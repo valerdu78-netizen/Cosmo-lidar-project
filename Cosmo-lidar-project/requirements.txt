@@ -1,0 +1,6 @@
+numpy
+matplotlib
+pycraf
+astropy
+scipy
+jupyter

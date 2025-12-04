@@ -1,0 +1,15 @@
+name: cosmo-lidar-project
+channels:
+  - defaults
+dependencies:
+  - python=3.13.5
+  - numpy
+  - matplotlib
+  - pycraf
+  - astropy
+  - scipy
+  - jupyter
+  - pip
+  - pip:
+      - pytest
+      - notebook
