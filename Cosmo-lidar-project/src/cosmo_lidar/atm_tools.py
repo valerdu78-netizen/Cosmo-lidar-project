@@ -444,3 +444,93 @@ def Calcul_T_ant_cumulative(frequency, theta_b, altitudes, Temperature, Pressure
     T_ant_profile = cumulative_trapezoid(C_tot, altitudes, axis=0, initial=0)
         
     return T_ant_profile
+
+
+
+def Calcul_T_sky_1_el(frequency, altitudes, Temperature, Pressure, P_water, elevation, N=500):
+    
+    """
+    Method 1: compute antenna temperature T_sky by integrating over altitude.
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - N : int, number of angular integration points
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - T_sky : 1D array of antenna temperature values for each frequency (K)
+    """
+    #definitions des variables pertinentes
+    pi = np.pi 
+    thet = 90 - elevation
+    thet_rad = thet * pi/180
+    m = 1/(np.cos(thet_rad) + 0.50572*(96.07995-thet)**(-1.6364))   
+    wavelength = 3.e8 / frequency #m
+  
+    
+    altitudes_km = altitudes * u.m       # maintenant c'est une Quantity en m
+    altitudes_km = altitudes_km.to(u.km) # conversion en km
+    frequency_GHz = frequency*10**-9 * u.GHz
+
+   
+            
+    #Calcul de alpha
+
+    alpha_specific= alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+
+
+    tau = optical_depth_emission (altitudes, alpha_specific)
+    
+    # on définit le terme que l'on va intégrer sur l'altitudes 
+    C_tot = np.zeros((len(altitudes), len(frequency)))
+    C_tot = alpha_specific*m * Temperature[:, None] * np.exp(-tau*m)
+    T_sky = trapezoid(C_tot, altitudes, axis=0)
+        
+    
+    return T_sky
+
+def atmospheric_transmission(frequency, altitudes, Temperature, Pressure, P_water, elevation):
+    
+    """
+    Method 1: compute Transmission
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - N : int, number of angular integration points
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - Transmission : 1D array of tranmission values for each frequency ()
+    """
+    #definitions des variables pertinentes
+    pi = np.pi 
+    thet = 90 - elevation
+    thet_rad = thet * pi/180
+    m = 1/(np.cos(thet_rad) + 0.50572*(96.07995-thet)**(-1.6364))   
+    wavelength = 3.e8 / frequency #m
+  
+    
+    altitudes_km = altitudes * u.m       # maintenant c'est une Quantity en m
+    altitudes_km = altitudes_km.to(u.km) # conversion en km
+    frequency_GHz = frequency*10**-9 * u.GHz
+
+   
+            
+    #Calcul de alpha
+
+    alpha_specific= alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+
+
+    tau = optical_depth_emission (altitudes, alpha_specific)
+    
+    # on définit le terme que l'on va intégrer sur l'altitudes 
+    Transmission = np.zeros((len(altitudes), len(frequency)))
+    Transmission = np.exp(-tau*m)
+    
+        
+    
+    return Transmission [-1, :]  # Transmission totale de la colonne atmosphérique
