@@ -1,4 +1,4 @@
-#Import of libraries
+# Import of libraries
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,14 +20,14 @@ temperature.
 Key functions
 - effective_area_and_waist: compute Gaussian beam waist and effective area.
 - alpha_specific_function: compute specific absorption coefficient
-  (altitude × frequency grid) using pycraf.
+    (altitude × frequency grid) using pycraf.
 - optical_depth_emission: compute vertical cumulative optical depth.
 - contribution_effective_area: compute geometric angular contribution for
-  each altitude and frequency.
+    each altitude and frequency.
 - Calcul_T_ant_1_el: integrate contribution × alpha × temperature to obtain
-  antenna temperature (method 1).
+    antenna temperature (method 1).
 - Calcul_T_ant_2: use pycraf to obtain antenna contribution along the
-  observation cone (method 2).
+    observation cone (method 2).
 - calcul_PWV: integrate precipitable water vapor (PWV).
 
 Unit conventions (recommended)
@@ -36,7 +36,7 @@ Unit conventions (recommended)
 - Temperature: 1D array in kelvin (K)
 - Pressure, P_water: 1D arrays compatible with pycraf (e.g. hPa)
 - Functions that call pycraf convert values to astropy/pycraf units
-  (GHz, km) as needed.
+    (GHz, km) as needed.
 
 Dependencies
 - pycraf, astropy, numpy, scipy
@@ -47,9 +47,9 @@ Dependencies
 
 pi = np.pi  
 
-def effective_area_and_waist (alt, theta, waist_0, lambda_0) : 
+def effective_area_and_waist(alt, theta, waist_0, lambda_0):
     """
-    Compute Gaussian beam waist and effective area at given altitudes and angles.
+    Compute Gaussian beam waist and an effective area factor at given altitudes and angles.
 
     Parameters
     - alt : scalar or array, distance (m) along beam axis (can be broadcast with theta)
@@ -61,19 +61,14 @@ def effective_area_and_waist (alt, theta, waist_0, lambda_0) :
     - B : effective area factor (m^2 or dimensionless factor depending on definition)
     - w : beam waist at the given altitudes (m)
     """
-    #permet d'obtenir l'effective area en m-2 et le waist en m avec 
-    #les paramètres du télescope et de l'altitude étudiée
-    w = waist_0*np.sqrt(1+ (lambda_0*alt/(pi*waist_0**2))**2)
-    B = 2/pi*(lambda_0*alt/w)**2*np.exp(-2*(alt*np.tan(theta)/w)**2)
-    return B,w
+    w = waist_0 * np.sqrt(1 + (lambda_0 * alt / (pi * waist_0 ** 2)) ** 2)
+    B = 2 / pi * (lambda_0 * alt / w) ** 2 * np.exp(-2 * (alt * np.tan(theta) / w) ** 2)
+    return B, w
 
 
-#Mise en place de la méthode 1
-
-
-def alpha_specific_function(altitudes, frequency, Temperature, Pressure ,P_water) :
+def alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water):
     """
-    Compute the specific absorption coefficient α(altitude, frequency).
+    Compute the specific absorption coefficient alpha(altitude, frequency).
 
     Parameters
     - altitudes : 1D numpy array (m)
@@ -86,37 +81,37 @@ def alpha_specific_function(altitudes, frequency, Temperature, Pressure ,P_water
     - alpha_specific : array with shape (len(altitudes), len(frequency)), in m^-1
 
     Notes
-    - Converts altitudes -> km and frequency -> GHz for use with pycraf.
-    - Accepts astropy.Quantity inputs; conversion is handled internally.
+    - Uses pycraf.atm.atten_specific_annex1 which returns dB/km for dry and wet
+      contributions. This function converts those values to 1/m (Neper/m).
     """
-    altitudes_km = altitudes * u.m       # maintenant c'est une Quantity en m
-    altitudes_km = altitudes_km.to(u.km) # conversion en km
-    frequency_GHz = frequency*10**-9 * u.GHz
+    altitudes_km = altitudes * u.m  # make a Quantity in meters
+    altitudes_km = altitudes_km.to(u.km)  # convert to kilometers
+    frequency_GHz = frequency * 10 ** -9 * u.GHz
     Temperature = Temperature * u.K  # Ensure Temperature is a Quantity in K
-    Pressure = Pressure * u.hPa      # Ensure Pressure is a Quantity in hPa
-    P_water = P_water * u.hPa        # Ensure P_water is a Quantity in
+    Pressure = Pressure * u.hPa  # Ensure Pressure is a Quantity in hPa
+    P_water = P_water * u.hPa  # Ensure P_water is a Quantity in hPa
     P_dry = Pressure - P_water
-    
 
-    #Calcul du coefficient d'absorbtion alpha à l'aide de pycraf
+    # Calculate the absorption coefficient alpha using pycraf
     alpha_specific = np.zeros((len(altitudes_km), len(frequency)))
 
     for i in range(len(altitudes_km)):
-        
-        # Atténuation pour toutes les fréquences à cette altitude
-        alpha_dry_dB_km,alpha_wet_dB_km = pycraf.atm.atten_specific_annex1(frequency_GHz, P_dry[i], P_water[i], Temperature[i])
-        # Conversion en m^-1
-        alpha_tot_m = (alpha_dry_dB_km + alpha_wet_dB_km) * (np.log(10)/10) / 1000
-        
 
-        # Affectation à la ligne i
-        alpha_specific[i, :] = alpha_tot_m.value   #en m-1
+        # Attenuation for all frequencies at this altitude
+        alpha_dry_dB_km, alpha_wet_dB_km = pycraf.atm.atten_specific_annex1(
+            frequency_GHz, P_dry[i], P_water[i], Temperature[i]
+        )
+        # Convert from dB/km to 1/m (Neper per meter)
+        alpha_tot_m = (alpha_dry_dB_km + alpha_wet_dB_km) * (np.log(10) / 10) / 1000
+
+        # Assign to row i (in m^-1)
+        alpha_specific[i, :] = alpha_tot_m.value
     return alpha_specific
     
     
-def optical_depth_emission (altitudes, alpha_specific) :
+def optical_depth_emission(altitudes, alpha_specific):
     """
-    Compute cumulative vertical optical depth τ(z, f).
+    Compute cumulative vertical optical depth tau(z, f).
 
     Parameters
     - altitudes : 1D array (m), must be in increasing order
@@ -124,14 +119,14 @@ def optical_depth_emission (altitudes, alpha_specific) :
 
     Returns
     - tau : array (N_alt, N_freq), cumulative integral of alpha from bottom up
-    """    
+    """
     # altitudes : (N_alt,)
     # alpha_specific : (N_alt, N_freq)
 
     dz = np.diff(altitudes)  # (N_alt-1,)
     alpha_avg = 0.5 * (alpha_specific[1:, :] + alpha_specific[:-1, :])  # (N_alt-1, N_freq)
 
-    # intégrales cumulées sur l'axe altitude
+    # cumulative integrals along altitude axis
     tau = np.zeros_like(alpha_specific)
     tau[1:, :] = np.cumsum(alpha_avg * dz[:, None], axis=0)
 
@@ -146,40 +141,49 @@ def contribution_effective_area (frequency, theta_b, altitudes, elevation, N = 5
     Compute geometric contribution C_alt(altitude, frequency) from angular integration.
 
     Parameters
-    - frequency : 1D array (Hz)
-    - theta_b : array or scalar of beam opening angles (rad); typically same length as frequency
-    - altitudes : 1D array (m)
+    - frequency : 1D numpy array (Hz)
+    - theta_b : 1D numpy array or scalar of beam opening angles (radians); typically same length as frequency
+    - altitudes : 1D numpy array (meters)
     - elevation : elevation angle in degrees (90 = zenith)
-    - N : int, number of points used for angular integration
-    
+    - N : int, number of points used for angular integration (default 500)
 
     Returns
-    - C_alt : array shape (len(altitudes), len(frequency))
+    - C_alt : 2D numpy array, shape (len(altitudes), len(frequency)), geometric contribution for each altitude and frequency
+
+    Notes
+    - Broadcasting: altitudes[:, None] and theta[None, :] are used to vectorize calculations.
+    - Output shape: (number of altitudes, number of frequencies)
+    - All input arrays must be 1D and compatible in length as described above.
+    - Units: frequency in Hz, altitudes in meters, theta_b in radians, elevation in degrees.
     """
 
-    #definitions des variables pertinentes
-    pi = np.pi     
-    wavelength = 3.e8 / frequency #m
-    w_0 = wavelength / (pi*theta_b) #m
-    #Calcul de c_alt
-    C_alt = np.zeros((len(altitudes),len(frequency))) #tableau pour enregistrer les contributions à chaque altitude et différentes fréquences
+    # Define relevant variables
+    pi = np.pi
+    wavelength = 3.e8 / frequency  # meters
+    w_0 = wavelength / (pi * theta_b)  # meters
+    # Initialize C_alt array to store contributions for each altitude and frequency
+    C_alt = np.zeros((len(altitudes), len(frequency)))
     altitudes_rel = altitudes - altitudes[0]
-    elev_rad = elevation * pi/180
-    
+    elev_rad = elevation * pi / 180
 
     for j in range(len(frequency)):
-        """theta = np.linspace(0, theta_lim[j], N)"""  # (N,)
-        theta= np.geomspace(0.000001, 1.57, N)
+        # theta: integration variable, logarithmically spaced from near zero to pi/2 radians
+        theta = np.geomspace(0.000001, 1.57, N)
         wavelength_j = wavelength[j]
         w0_j = w_0[j]
 
-        # On vectorise : altitudes[:,None] et theta[None,:]
-        eff_area, _ = effective_area_and_waist(1/np.sin(elev_rad)*altitudes_rel[:, None], theta[None, :], w0_j, wavelength_j)  # shape (len(altitudes), N)
+        # Vectorize: altitudes[:, None] and theta[None, :] for broadcasting
+        eff_area, _ = effective_area_and_waist(
+            1 / np.sin(elev_rad) * altitudes_rel[:, None], theta[None, :], w0_j, wavelength_j
+        )  # shape (len(altitudes), N)
 
-        f_values = (2 * pi * (altitudes[:, None] / wavelength_j)**2* np.abs(np.tan(theta))[None, :]* eff_area)
+        # Compute integrand for each altitude and theta
+        f_values = (
+            2 * pi * (altitudes[:, None] / wavelength_j) ** 2 * np.abs(np.tan(theta))[None, :] * eff_area
+        )
 
-        # Intégrale Simpson sur theta, pour chaque altitude
-        C_alt[:, j] = trapezoid(f_values, theta, axis=1)/altitudes**2  
+        # Simpson integral over theta for each altitude
+        C_alt[:, j] = trapezoid(f_values, theta, axis=1) / altitudes ** 2
     return C_alt
 
 
@@ -534,3 +538,87 @@ def atmospheric_transmission(frequency, altitudes, Temperature, Pressure, P_wate
         
     
     return Transmission [-1, :]  # Transmission totale de la colonne atmosphérique
+
+
+R_WATER =  461.5  # J/(kg·K)
+
+def calc_pwv(p_water_hpa, temp_k, z_m):
+    rho_water = (p_water_hpa * 100) / (R_WATER * temp_k) * 1000
+    pwv = trapezoid(rho_water, x=z_m) / 1000.0
+    return pwv
+
+def calc_zmoy(rho_water_g_m3, pwv_mm, z_m):
+    """Calculates the mean altitude (z_moy) of the water vapor profile."""
+    if pwv_mm < 1e-9: # Handle case of almost no water
+        return np.nan
+    # z_moy = Integral(z * rho_w * dz) / Integral(rho_w * dz)
+    # rho is g/m3, z is m. pwv is mm = kg/m2 = g/m2 * 1000.
+    # Integrand for numerator: (g/m3 * m * m) = g/m
+    # Denominator: g/m2
+    # Result: m
+    numerator = trapezoid(rho_water_g_m3 * z_m, x=z_m)
+    denominator = pwv_mm * 1000.0 # Convert PWV from mm to g/m^2
+    return numerator / denominator
+
+
+
+def add_perturbation(z_center, delta_pwv, z_grid, P_ref, T_prof):
+    # Largeur dynamique (augmente avec l'altitude)
+    
+    sigma = 150 + (z_center - 5000) * 0.1
+    integral_target = delta_pwv * 1000.0 
+    amplitude = integral_target / (sigma * np.sqrt(2 * np.pi))
+    
+    rho_perturbation = amplitude * np.exp(-0.5 * ((z_grid - z_center) / sigma)**2)
+    P_perturbation = (rho_perturbation * R_WATER * T_prof) / 1000.0 / 100.0 
+    
+    P_water_new = P_ref + P_perturbation
+    return np.maximum(P_water_new, 1e-9)
+
+
+def compute_sensitivity_profile(T_prof, P_prof, P_water_prof, altitudes, frequency, elevation, dPWV, target_initial_pwv):
+    """
+    Calcule la sensibilité de T_sky et Transmission à l'altitude d'une perturbation dPWV.
+    La référence est un scaling uniforme du profil pour atteindre (initial + dPWV).
+    """
+    
+    # 1. Normalisation du profil initial à 'target_initial_pwv' (ex: 1.0 mm)
+    raw_pwv = calc_pwv(P_water_prof, T_prof, altitudes)
+    scale_factor = target_initial_pwv / raw_pwv
+    P_water_base = P_water_prof * scale_factor
+    
+    # 2. Calcul de la Référence Dynamique (Scaling Uniforme)
+    # On vise un PWV total = initial + dPWV
+    total_target_pwv = target_initial_pwv + dPWV
+    scale_to_target = total_target_pwv / target_initial_pwv
+    P_water_ref_uniform = P_water_base * scale_to_target
+    
+    # Radiométrie Référence (Uniforme)
+    T_sky_ref = Calcul_T_sky_1_el(frequency, altitudes, T_prof, P_prof, P_water_ref_uniform, elevation)[0]
+    Trans_ref = atmospheric_transmission(frequency, altitudes, T_prof, P_prof, P_water_ref_uniform, elevation)[0]
+    
+    # 3. Boucle sur les altitudes de perturbation
+    # On va scanner de 6 km jusqu'à un peu en dessous du sommet de la grille ici 9500
+    z_min_scan = 6000
+    z_max_scan = 9500 # Marge de sécurité
+    if z_max_scan < z_min_scan: z_max_scan = z_min_scan + 500
+    
+    z_centers = np.linspace(z_min_scan, z_max_scan, 20)
+    
+    diff_T_list = []
+    diff_Trans_list = []
+    
+    for z_c in z_centers:
+        # Création du profil Perturbé (Base + Gaussienne Locale)
+        # Note : add_perturbation ajoute dPWV à la base (donc total = initial + dPWV)
+        P_water_pert = add_perturbation(z_c, dPWV, altitudes, P_water_base, T_prof)
+        
+        # Radiométrie Perturbée
+        val_T = Calcul_T_sky_1_el(frequency, altitudes, T_prof, P_prof, P_water_pert, elevation)[0]
+        val_Trans = atmospheric_transmission(frequency, altitudes, T_prof, P_prof, P_water_pert, elevation)[0]
+        
+        # Différence (Local - Uniforme)
+        diff_T_list.append(val_T - T_sky_ref)
+        diff_Trans_list.append(val_Trans - Trans_ref)
+        
+    return z_centers, np.array(diff_T_list), np.array(diff_Trans_list)

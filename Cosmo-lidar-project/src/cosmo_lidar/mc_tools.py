@@ -277,7 +277,7 @@ def Monte_Carlo_T_ant_mod(f,theta_b, N, elev, MC_law, N_MC, WVMR, SNR, Temperatu
 
     
     R_d_air = 287 #J/(kg*K)
-    R_water = 462 #J/(kg*K)
+    R_water = 461.5 #J/(kg*K)
 
 
     rho_water_MC = Pressure*100*WVMR_MC/(1000*R_d_air*Temperature)*1/(1+R_water/R_d_air*WVMR_MC/1000) #en kg/m3
@@ -580,3 +580,53 @@ def predict_SNR_T_2 (frequency, theta_b,z,WVMR,elev,T,SNR_temperature, P,N_MC) :
     #pour un miroir de 50cm
     simu = Monte_Carlo_T_ant_mod_2(frequency,theta_b, N, elev, generate_Pwater_MC_lognormal, generate_Pwater_MC, N_MC, WVMR_t, snr_attendu_t, temp_t, SNR_temperature_t, P_data_t, z_t)
     return simu
+
+
+
+#mise en place de fonctions pour estimer l'incertitude sur PWV, zmoy et std_z dû à l'utilisation d'un lidar
+A = 106533.049
+c = 1.470303e-05
+R_water = 461.5 #J/(kg*K)
+R_d_air = 287 #J/(kg*K)
+def Monte_Carlo_PWV_zmoy_stdz(WVMR, altitudes, N_MC, Temperature, Pressure, elev) :
+    """Estimate uncertainties on PWV, z_moy et std_z due to measuring the water vapor distribution with a lidar
+
+    Args:
+        WVMR (array): Water Vapor Mixing Ratio (g/kg)
+        altitudes (array): Altitudes (m)
+        N_MC (int): Number of Monte Carlo simulations
+        Temperature (array): Temperature profile (K)
+        Pressure (array): Pressure profile (hPa)
+        elev (float): Elevation angle (degrees)
+
+    Returns:
+        tuple: Standard deviations and means of PWV, z_moy, and std_z (std_PWV, PWV_mean, std_zmoy, zmoy_mean, std_stdz, stdz_mean)
+    """
+    
+    snr_attendu_ref = calcul_snr(A, c, WVMR, altitudes, Pressure, Temperature, elev) #modèle ajusté avec patrick
+    snr_attendu = scale_snr_for_variable_bins(altitudes, snr_attendu_ref, elev, dz_ref=30.0) [0]
+    
+    WVMR_MC = generate_Pwater_MC_lognormal(WVMR, N_MC, 1/snr_attendu, rng=None)
+    rho_water_MC = Pressure*100*WVMR_MC/(1000*R_d_air*Temperature)*1/(1+R_water/R_d_air*WVMR_MC/1000) #en kg/m3
+    
+    # PWV: (N_MC,)
+    PWV_MC = trapezoid(rho_water_MC, altitudes, axis=1)  # mm
+
+    # z_moy: (N_MC,)
+    z_moy_MC = trapezoid(rho_water_MC * altitudes[None, :], altitudes, axis=1) / PWV_MC  #en m
+
+    # std_z: (N_MC,)
+    dz2 = (altitudes[None, :] - z_moy_MC[:, None])**2
+    std_z_MC = np.sqrt(trapezoid(dz2 * rho_water_MC, altitudes, axis=1) / PWV_MC)  #en m
+    
+    PWV_mean = np.mean(PWV_MC)
+    zmoy_mean = np.mean(z_moy_MC)
+    stdz_mean = np.mean(std_z_MC)
+
+    std_PWV = np.std(PWV_MC, ddof=1)
+    std_zmoy = np.std(z_moy_MC, ddof=1)
+    std_stdz = np.std(std_z_MC, ddof=1)
+    
+    return (std_PWV, PWV_mean, std_zmoy, zmoy_mean, std_stdz, stdz_mean)
+    
+    
