@@ -8,6 +8,7 @@ from astropy import units as u
 from scipy.interpolate import UnivariateSpline
 from scipy.integrate import simpson
 from scipy.integrate import trapezoid, cumulative_trapezoid
+from scipy import constants
 
 """
 cosmo_lidar.atm_tools
@@ -46,6 +47,16 @@ Dependencies
 #definition of variables
 
 pi = np.pi  
+# Planck constant (h)
+h = constants.h           # 6.62607015e-34 (Joules * second)
+
+# Boltzmann constant (kb)
+kb = constants.k          # 1.380649e-23 (Joules / Kelvin)
+
+# Speed of light (c)
+c = constants.c           # 299792458.0 (meters / second)
+
+#Definition of functions
 
 def effective_area_and_waist(alt, theta, waist_0, lambda_0):
     """
@@ -622,3 +633,200 @@ def compute_sensitivity_profile(T_prof, P_prof, P_water_prof, altitudes, frequen
         diff_Trans_list.append(val_Trans - Trans_ref)
         
     return z_centers, np.array(diff_T_list), np.array(diff_Trans_list)
+
+
+def planck_source(nu, T):
+    """Calculate the Planck function B(nu, T) in W/m^2/Hz/sr with nu in Hz and T in K ."""
+    exponent = (h * nu) / (kb * T)
+    return (2 * h * nu**3 / c**2) / (np.exp(exponent) - 1)
+
+
+# New updated functions for the calculation of the brightness temperature
+
+def Calcul_T_sky_lf_RJ(frequency, altitudes, Temperature, Pressure, P_water, elevation, N=500):
+    
+    """
+    Method 1: compute antenna temperature T_sky by integrating over altitude under RJ approximation.
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - N : int, number of angular integration points
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - T_sky : 1D array of antenna temperature values for each frequency (K_RJ)
+    """
+    #definitions des variables pertinentes
+    pi = np.pi 
+    thet = 90 - elevation
+    thet_rad = thet * pi/180
+    m = 1/(np.cos(thet_rad) + 0.50572*(96.07995-thet)**(-1.6364))   
+
+    
+    altitudes_km = altitudes * u.m       # maintenant c'est une Quantity en m
+    altitudes_km = altitudes_km.to(u.km) # conversion en km
+    frequency_GHz = frequency*10**-9 * u.GHz
+
+   
+            
+    #Calcul de alpha
+
+    alpha_specific= alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+
+
+    tau = optical_depth_emission (altitudes, alpha_specific)
+    
+    # on définit le terme que l'on va intégrer sur l'altitudes 
+    C_tot = np.zeros((len(altitudes), len(frequency)))
+    C_tot = alpha_specific*m * Temperature[:, None] * np.exp(-tau*m)
+    T_sky = trapezoid(C_tot, altitudes, axis=0)
+        
+    
+    return T_sky
+
+
+
+def Calcul_T_sky_1_el_bb(frequency, altitudes, Temperature, Pressure, P_water, elevation):
+    
+    """
+    Method 1: compute antenna temperature T_sky by integrating over altitude using the blackbody approximation.
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - T_sky : 1D array of antenna temperature values for each frequency (K_RJ)
+    """
+    #definitions des variables pertinentes
+    pi = np.pi 
+    thet = 90 - elevation
+    thet_rad = thet * pi/180
+    m = 1/(np.cos(thet_rad) + 0.50572*(96.07995-thet)**(-1.6364))   
+
+    
+    #Calcul de alpha
+
+    alpha_specific= alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+
+
+    tau = optical_depth_emission (altitudes, alpha_specific)
+
+    B_nu = planck_source(frequency[None,:], Temperature[:, None])  # shape (N_alt, N_freq)
+    
+    # on définit le terme que l'on va intégrer sur l'altitudes 
+    C_tot = np.zeros((len(altitudes), len(frequency)))
+    C_tot = alpha_specific*m * B_nu * np.exp(-tau*m)
+    I_nu = trapezoid(C_tot, altitudes, axis=0) # radiance in W/m^2/Hz/sr
+
+    T_sky_RJ = (c**2 / (2 * kb * frequency**2)) * I_nu  # Convert radiance to brightness temperature in K_RJ
+        
+    
+    return T_sky_RJ
+
+
+def Calcul_T_sky_Slab_RJ(frequency, altitudes, Temperature, Pressure, P_water, elevation):
+    """
+    Method: Compute antenna temperature T_sky using the Isothermal Slab Summation.
+    T_sky = sum( T_i * (1 - exp(-d_tau_i * m)) * exp(-tau_below_i * m) )
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - T_sky : 1D array of antenna temperature values for each frequency (K_RJ)
+    """
+
+    zenith_angle = 90 - elevation
+    # Using airmass formula (Kasten-Young)
+    m = 1 / (np.cos(np.radians(zenith_angle)) + 0.50572 * (96.07995 - zenith_angle)**(-1.6364))
+    
+    # 2. Get Absorption Coefficient (alpha)
+    # alpha_specific should be in units of m^-1
+    alpha = alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+    
+    dz = np.diff(altitudes) # Shape: (len(altitudes)-1,)
+    
+    # Calculate Midpoint Properties for each slab
+    # We average the values between index i and i+1
+    T_mid = (Temperature[:-1] + Temperature[1:]) / 2.0
+    alpha_mid = (alpha[:-1, :] + alpha[1:, :]) / 2.0
+    
+    # d_tau is the optical thickness of each individual slab
+    d_tau = alpha_mid * dz[:, None]
+    
+    # 4. Calculate Tau Below (Cumulative attenuation from ground to layer i)
+    # tau_below for the 1st layer is 0. 
+    # For subsequent layers, it's the sum of d_tau of all layers below it.
+    tau_below = np.cumsum(d_tau, axis=0)
+    tau_below = np.insert(tau_below[:-1, :], 0, 0, axis=0) # Shift so first layer has 0 attenuation
+    
+    # 5. Apply the Summation
+    # Layer Emission = T * (1 - exp(-d_tau * m))
+    # Transmission to ground = exp(-tau_below * m)
+    T_layers = T_mid[:, None] * (1 - np.exp(-d_tau * m)) * np.exp(-tau_below * m)
+    
+    T_sky = np.sum(T_layers, axis=0)
+    
+    return T_sky
+
+
+
+def Calcul_T_sky_Slab_bb(frequency, altitudes, Temperature, Pressure, P_water, elevation):
+    """
+    Method: Compute antenna radiance using the Isothermal Slab Summation then convert to brightness temperature (K_RJ)
+    
+
+    Parameters
+    - frequency : 1D array (Hz)
+    - altitudes : 1D array (m)
+    - Temperature, Pressure, P_water : 1D arrays of length len(altitudes) (K, hPa, hPa) not Quantities
+    - elevation : elevation angle in degrees (90 = zenith)
+
+    Returns
+    - T_sky : 1D array of antenna temperature values for each frequency (K_RJ)
+    """
+
+    zenith_angle = 90 - elevation
+    # Using airmass formula (Kasten-Young)
+    m = 1 / (np.cos(np.radians(zenith_angle)) + 0.50572 * (96.07995 - zenith_angle)**(-1.6364))
+    
+    # 2. Get Absorption Coefficient (alpha)
+    # alpha_specific should be in units of m^-1
+    alpha = alpha_specific_function(altitudes, frequency, Temperature, Pressure, P_water)
+    
+    dz = np.diff(altitudes) # Shape: (len(altitudes)-1,)
+    
+    # Calculate Midpoint Properties for each slab
+    # We average the values between index i and i+1
+    T_mid = (Temperature[:-1] + Temperature[1:]) / 2.0
+    alpha_mid = (alpha[:-1, :] + alpha[1:, :]) / 2.0
+    
+    # d_tau is the optical thickness of each individual slab
+    d_tau = alpha_mid * dz[:, None]
+    
+    # 4. Calculate Tau Below (Cumulative attenuation from ground to layer i)
+    # tau_below for the 1st layer is 0. 
+    # For subsequent layers, it's the sum of d_tau of all layers below it.
+    tau_below = np.cumsum(d_tau, axis=0)
+    tau_below = np.insert(tau_below[:-1, :], 0, 0, axis=0) # Shift so first layer has 0 attenuation
+    
+    # 5 Calculate the Planck function at the mid-layer temperature for each frequency
+    B_nu_mid = planck_source(frequency[None,:], T_mid[:, None])  # shape (N_alt-1, N_freq)
+    # 5. Apply the Summation
+    # Layer Emission = T * (1 - exp(-d_tau * m))
+    # Transmission to ground = exp(-tau_below * m)
+    I_layers = B_nu_mid * (1 - np.exp(-d_tau * m)) * np.exp(-tau_below * m)
+
+    I_nu = np.sum(I_layers, axis=0) # radiance in W/m^2/Hz/sr
+
+    T_sky_RJ = (c**2 / (2 * kb * frequency**2)) * I_nu  # Convert radiance to brightness temperature in K_RJ
+    
+    return T_sky_RJ

@@ -1,15 +1,16 @@
 name: cosmo-lidar-project
 channels:
+  - conda-forge
   - defaults
 dependencies:
-  - python=3.13.5
+  - python=3.11
   - numpy
   - matplotlib
-  - pycraf
   - astropy
   - scipy
   - jupyter
   - pip
   - pip:
+      - pycraf
       - pytest
       - notebook
